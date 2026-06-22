@@ -285,8 +285,7 @@ async function agentLoop(messages: any[]): Promise<void> {
 
       // s03 change: run through permission pipeline before executing
       if (!(await checkPermission(block))) {
-        results.push({ type: "tool_result", tool_use_id: block.id,
-                        content: "Permission denied." });
+        results.push({ type: "tool_result", tool_use_id: block.id, content: "Permission denied." });
         continue;
       }
 
