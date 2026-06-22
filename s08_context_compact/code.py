@@ -222,9 +222,9 @@ SUB_TOOLS = [
 SUB_HANDLERS = {"bash": run_bash, "read_file": run_read, "write_file": run_write,
                 "edit_file": run_edit, "glob": run_glob}
 
-def spawn_subagent(task: str) -> str:
+def spawn_subagent(description: str) -> str:
     print(f"\n\033[35m[Subagent spawned]\033[0m")
-    messages = [{"role": "user", "content": task}]
+    messages = [{"role": "user", "content": description}]
     for _ in range(30):
         response = client.messages.create(model=MODEL, system=SUB_SYSTEM,
             messages=messages, tools=SUB_TOOLS, max_tokens=8000)
