@@ -339,8 +339,7 @@ async function agentLoop(messages: any[]): Promise<void> {
   while (true) {
     // s05: nag reminder — inject if model hasn't updated todos for 3 rounds
     if (roundsSinceTodo >= 3 && messages.length > 0) {
-      messages.push({ role: "user",
-                       content: "<reminder>Update your todos.</reminder>" });
+      messages.push({ role: "user", content: "<reminder>Update your todos.</reminder>" });
       roundsSinceTodo = 0;
     }
 
