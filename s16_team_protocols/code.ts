@@ -570,7 +570,7 @@ function spawnTeammateThread(name: string, role: string, prompt: string): string
     return false;  // continue
   }
 
-  function run(): void {
+  async function run(): Promise<void> {
     const messages: any[] = [{ role: "user", content: prompt }];
     const subTools: any[] = [
       { name: "bash", description: "Run a shell command.",
@@ -607,6 +607,8 @@ function spawnTeammateThread(name: string, role: string, prompt: string): string
       submit_plan: (plan: string) => _teammateSubmitPlan(name, plan),
     };
 
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
     let shutdownRequested = false;
     while (!shutdownRequested) {
       // Check inbox for protocol messages
@@ -632,33 +634,82 @@ function spawnTeammateThread(name: string, role: string, prompt: string): string
       }
 
       // LLM turn
+      let response: any;
       try {
-        const response = client.messages.create({
+        response = await client.messages.create({
           model: MODEL, system, messages: messages.slice(-20),
           tools: subTools, max_tokens: 8000,
         });
-        // We can't await in this sync thread, but we use .then for teaching
-        // The original Python was sync — we simulate with a sync wrapper
       } catch {
         break;
       }
 
-      // Note: Since this is a teaching conversion from Python's threading model,
-      // the LLM call above is meant to be blocking. In real Node.js this would
-      // need async/await. For teaching purposes, we keep the sync structure
-      // with a warning.
-      break; // Break the loop — full async meed proper async/await
+      messages.push({ role: "assistant", content: response.content });
+      if (response.stop_reason !== "tool_use") {
+        // Idle: wait for inbox messages instead of exiting
+        while (!shutdownRequested) {
+          await sleep(1000);
+          const idleInbox = BUS.readInbox(name);
+          if (idleInbox.length === 0) continue;
+          const idleNonProtocol: BusMessage[] = [];
+          for (const msg of idleInbox) {
+            if (msg.type === "shutdown_request" || msg.type === "plan_approval_response") {
+              const stop = handleInboxMessage(name, msg, messages);
+              if (stop) {
+                shutdownRequested = true;
+                break;
+              }
+            } else {
+              idleNonProtocol.push(msg);
+            }
+          }
+          if (shutdownRequested) break;
+          if (idleNonProtocol.length > 0) {
+            const inboxJson = JSON.stringify(idleNonProtocol);
+            messages.push({ role: "user",
+              content: `<inbox>${inboxJson}</inbox>` });
+            break;  // back to LLM turn with new messages
+          }
+        }
+        continue;
+      }
+
+      // Execute tool calls
+      const results: any[] = [];
+      for (const block of response.content) {
+        if (block.type === "tool_use") {
+          const handler = subHandlers[block.name];
+          const output = handler
+            ? handler(...Object.values(block.input))
+            : "Unknown";
+          results.push({ type: "tool_result",
+                         tool_use_id: block.id,
+                         content: String(output) });
+        }
+      }
+      messages.push({ role: "user", content: results });
     }
 
     // Send final summary to Lead
-    BUS.send(name, "lead", "Done.", "result");
+    let summary = "Done.";
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === "assistant" && Array.isArray(msg.content)) {
+        let found = false;
+        for (const b of msg.content) {
+          if (b.type === "text") { summary = b.text; found = true; break; }
+        }
+        if (found) break;
+      }
+    }
+    BUS.send(name, "lead", summary, "result");
     delete activeTeammates[name];
     console.log(`  \x1b[32m[teammate] ${name} finished\x1b[0m`);
   }
 
   activeTeammates[name] = true;
   // In Node.js, use setTimeout to simulate daemon thread
-  setTimeout(run, 0);
+  setTimeout(() => { run().catch(console.error); }, 0);
   console.log(`  \x1b[36m[teammate] ${name} spawned as ${role}\x1b[0m`);
   return `Teammate '${name}' spawned as ${role}`;
 }

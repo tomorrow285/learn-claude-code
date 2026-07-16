@@ -998,9 +998,9 @@ async function runAgentTurnLocked(userQuery?: string | null): Promise<void> {
   console.log();
 }
 
-function queueProcessorLoop(): void {
+async function queueProcessorLoop(): Promise<void> {
   /** Auto-deliver fired cron jobs when the agent is idle. */
-  setInterval(() => {
+  setInterval(async () => {
     if (!hasCronQueue()) return;
     // Non-blocking acquire attempt
     if (agentLock.locked) return;
@@ -1008,7 +1008,7 @@ function queueProcessorLoop(): void {
     try {
       if (!hasCronQueue()) return;
       console.log(`\n  \x1b[35m[queue processor] delivering scheduled work\x1b[0m`);
-      runAgentTurnLocked().catch(console.error);
+      await runAgentTurnLocked();
     } finally {
       agentLock.release();
     }

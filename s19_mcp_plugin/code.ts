@@ -560,10 +560,11 @@ function spawnTeammateThread(name: string, role: string, prompt: string): string
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       if (msg.role === "assistant" && Array.isArray(msg.content)) {
+        let found = false;
         for (const b of msg.content) {
-          if (b.type === "text") { summary = b.text; break; }
+          if (b.type === "text") { summary = b.text; found = true; break; }
         }
-        break;
+        if (found) break;
       }
     }
     BUS.send(name, "lead", summary, "result");
@@ -863,7 +864,10 @@ async function agentLoop(messages: any[], context: Record<string, unknown>): Pro
       if (block.type !== "tool_use") continue;
       console.log(`\x1b[36m> ${block.name}\x1b[0m`);
       const handler = handlers[block.name];
-      const output = handler ? handler(...Object.values(block.input)) : "Unknown";
+      const isMcp = block.name.startsWith("mcp__");
+      const output = handler
+        ? (isMcp ? handler(block.input) : handler(...Object.values(block.input)))
+        : "Unknown";
       console.log(String(output).slice(0, 300));
       results.push({ type: "tool_result", tool_use_id: block.id, content: output });
     }

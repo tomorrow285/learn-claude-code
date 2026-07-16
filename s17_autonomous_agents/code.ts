@@ -503,10 +503,11 @@ function spawnTeammateThread(name: string, role: string, prompt: string): string
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       if (msg.role === "assistant" && Array.isArray(msg.content)) {
+        let found = false;
         for (const b of msg.content) {
-          if (b.type === "text") { summary = b.text; break; }
+          if (b.type === "text") { summary = b.text; found = true; break; }
         }
-        break;
+        if (found) break;
       }
     }
     BUS.send(name, "lead", summary, "result");

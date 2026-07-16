@@ -363,8 +363,9 @@ async function agentLoop(
       // Path 2: prompt_too_long -> reactive compact (once)
       if (isPromptTooLongError(e)) {
         if (!state.hasAttemptedReactiveCompact) {
+          const compacted = reactiveCompact(messages);
           messages.length = 0;
-          messages.push(...reactiveCompact(messages));
+          messages.push(...compacted);
           state.hasAttemptedReactiveCompact = true;
           continue;
         }

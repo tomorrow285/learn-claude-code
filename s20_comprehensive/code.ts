@@ -454,9 +454,7 @@ function callToolHandler(handler: Function | undefined, args: Record<string, unk
 function _normalizeTodos(todos: unknown): [any[] | null, string | null] {
   if (typeof todos === "string") {
     try { todos = JSON.parse(todos); } catch {
-      try { todos = eval(todos); } catch {
-        return [null, "Error: todos must be a list or JSON array string"];
-      }
+      return [null, "Error: todos must be a list or JSON array string"];
     }
   }
   if (!Array.isArray(todos)) return [null, "Error: todos must be a list"];
@@ -1252,11 +1250,11 @@ function cronMatches(cronExpr: string, dt: Date): boolean {
   const fields = cronExpr.trim().split(/\s+/);
   if (fields.length !== 5) return false;
   const [minute, hour, dom, month, dow] = fields;
-  const dowVal = dt.getUTCDay(); // 0=Sun
-  const m = _cronFieldMatches(minute, dt.getUTCMinutes());
-  const h = _cronFieldMatches(hour, dt.getUTCHours());
-  const domOk = _cronFieldMatches(dom, dt.getUTCDate());
-  const monthOk = _cronFieldMatches(month, dt.getUTCMonth() + 1);
+  const dowVal = dt.getDay(); // 0=Sun
+  const m = _cronFieldMatches(minute, dt.getMinutes());
+  const h = _cronFieldMatches(hour, dt.getHours());
+  const domOk = _cronFieldMatches(dom, dt.getDate());
+  const monthOk = _cronFieldMatches(month, dt.getMonth() + 1);
   const dowOk = _cronFieldMatches(dow, dowVal);
   if (!(m && h && monthOk)) return false;
   if (dom === "*" && dow === "*") return true;
@@ -1347,7 +1345,7 @@ function cancelJob(jobId: string): string {
 function cronSchedulerLoop(): void {
   setInterval(() => {
     const now = new Date();
-    const marker = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")} ${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
+    const marker = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     for (const job of Object.values(scheduledJobs)) {
       try {
         if (cronMatches(job.cron, now) && _lastFired[job.id] !== marker) {
@@ -1649,8 +1647,8 @@ let agentLock = false;
 
 async function prepareContext(messages: any[]): Promise<any[]> {
   toolResultBudget(messages);
-  snipCompact(messages);
-  microCompact(messages);
+  messages.splice(0, messages.length, ...snipCompact(messages));
+  messages.splice(0, messages.length, ...microCompact(messages));
   if (estimateSize(messages) > CONTEXT_LIMIT) {
     messages.splice(0, messages.length, ...(await compactHistory(messages)));
   }
@@ -1809,14 +1807,20 @@ async function cronAutorunLoop(history: any[], context: Record<string, unknown>)
     await sleep(1);
     const fired = consumeCronQueue();
     if (fired.length === 0) continue;
-    const turnStart = history.length;
-    for (const job of fired) {
-      history.push({ role: "user", content: `[Scheduled] ${job.prompt}` });
-      terminalPrint(`  \x1b[35m[cron auto] ${job.prompt.slice(0, 60)}\x1b[0m`);
+    while (agentLock) await sleep(0.05);
+    agentLock = true;
+    try {
+      const turnStart = history.length;
+      for (const job of fired) {
+        history.push({ role: "user", content: `[Scheduled] ${job.prompt}` });
+        terminalPrint(`  \x1b[35m[cron auto] ${job.prompt.slice(0, 60)}\x1b[0m`);
+      }
+      await agentLoop(history, context);
+      context = updateContext(context, history);
+      printTurnAssistants(history, turnStart);
+    } finally {
+      agentLock = false;
     }
-    await agentLoop(history, context);
-    context = updateContext(context, history);
-    printTurnAssistants(history, turnStart);
   }
 }
 
@@ -1847,9 +1851,15 @@ async function main(): Promise<void> {
     const turnStart = history.length;
     history.push({ role: "user", content: query });
 
-    await agentLoop(history, context);
-    context = updateContext(context, history);
-    printTurnAssistants(history, turnStart);
+    while (agentLock) await sleep(0.05);
+    agentLock = true;
+    try {
+      await agentLoop(history, context);
+      context = updateContext(context, history);
+      printTurnAssistants(history, turnStart);
+    } finally {
+      agentLock = false;
+    }
 
     const inbox = consumeLeadInbox(true);
     if (inbox.length > 0) {
