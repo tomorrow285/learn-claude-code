@@ -216,11 +216,11 @@ interface ContentBlock {
   input?: Record<string, unknown>;
 }
 
-function agentLoop(messages: { role: string; content: unknown }[], context: Context): void {
+async function agentLoop(messages: { role: string; content: unknown }[], context: Context): Promise<void> {
   /** Main loop — uses assembled system prompt instead of hardcoded SYSTEM. */
   let system = getSystemPrompt(context);
   while (true) {
-    const response = client.messages.create(
+    const response = await client.messages.create(
       MODEL, system, messages, TOOLS, { maxTokens: 8000 }
     );
     messages.push({ role: "assistant", content: response.content });
@@ -264,7 +264,6 @@ async function main(): Promise<void> {
 
   const history: { role: string; content: unknown }[] = [];
   let context: Context = updateContext({} as Context, []);
-  let system = getSystemPrompt(context);
 
   const ask = (): Promise<string> =>
     new Promise((resolve) => {
@@ -277,46 +276,8 @@ async function main(): Promise<void> {
       break;
     }
     history.push({ role: "user", content: query });
-
-    // Use assembled system prompt
-    const response = client.messages.create(
-      MODEL, system, history, TOOLS, { maxTokens: 8000 }
-    );
-    history.push({ role: "assistant", content: response.content });
-
-    if (response.stop_reason === "tool_use") {
-      // Process tool calls inline for simplicity (s10 focuses on prompt assembly)
-      const results: { type: string; tool_use_id: string; content: string }[] = [];
-      for (const block of response.content as ContentBlock[]) {
-        if (block.type !== "tool_use") continue;
-        console.log(`\x1b[36m> ${block.name}\x1b[0m`);
-        const handler = TOOL_HANDLERS[block.name!];
-        const output = handler
-          ? handler(...Object.values(block.input ?? {}))
-          : `Unknown: ${block.name}`;
-        console.log(String(output).slice(0, 200));
-        results.push({
-          type: "tool_result",
-          tool_use_id: block.id!,
-          content: output,
-        });
-      }
-      history.push({ role: "user", content: results });
-
-      // Re-evaluate context and prompt after tool round
-      context = updateContext(context, history);
-      system = getSystemPrompt(context);
-
-      // Follow-up call for tool results
-      const response2 = client.messages.create(
-        MODEL, system, history, TOOLS, { maxTokens: 8000 }
-      );
-      history.push({ role: "assistant", content: response2.content });
-      context = updateContext(context, history);
-      system = getSystemPrompt(context);
-    }
-
-    // Print final response text
+    await agentLoop(history, context);
+    context = updateContext(context, history);
     const lastContent = history[history.length - 1].content;
     if (Array.isArray(lastContent)) {
       for (const block of lastContent as ContentBlock[]) {
